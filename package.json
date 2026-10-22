@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
+    "check-deps": "tsx scripts/check-dependencies.ts",
+    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm check-deps && pnpm test && pnpm build",
     "simulate": "tsx --env-file=.env.example scripts/simulate-webhook.ts",
     "seed": "tsx --env-file=.env.example scripts/seed.ts"
   },
