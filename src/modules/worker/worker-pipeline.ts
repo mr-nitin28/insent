@@ -5,6 +5,7 @@
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
+import { env } from "@/config/env";
 import { businessConfig } from "@/config/business.config";
 import { runsService, type AutomationRunRow } from "@/modules/runs/runs.service";
 import { accountsService } from "@/modules/accounts/accounts.service";
@@ -124,12 +125,20 @@ export const workerPipeline = {
     }
 
     // F. Tracked Link & Template Rendering
+    const isDirectUrl =
+      rule.destination_ref.startsWith("http://") || rule.destination_ref.startsWith("https://");
+    const providerId = isDirectUrl ? "custom-url" : "anozik";
     const { slug } = await linksService.createTrackedLink(run.workspace_id, rule.id, {
-      providerId: "anozik",
+      providerId,
       value: rule.destination_ref,
     });
-    const prefix = businessConfig.brand.domain.startsWith("http") ? "" : "https://";
-    const trackedUrl = `${prefix}${businessConfig.brand.domain}/r/${slug}`;
+    const baseUrl =
+      env.NODE_ENV === "development"
+        ? env.NEXT_PUBLIC_APP_URL
+        : businessConfig.brand.domain.startsWith("http")
+          ? businessConfig.brand.domain
+          : `https://${businessConfig.brand.domain}`;
+    const trackedUrl = `${baseUrl.replace(/\/+$/, "")}/r/${slug}`;
 
     const text = renderTemplate(
       rule.message_template,

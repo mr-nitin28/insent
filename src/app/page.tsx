@@ -1,179 +1,224 @@
-import { businessConfig } from "@/config/business.config";
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { Header } from "./components/Header";
+import { StatsCards } from "./components/StatsCards";
+import { ConnectedAccountsCard } from "./components/ConnectedAccountsCard";
+import { AutomationRulesCard } from "./components/AutomationRulesCard";
+import { RecentRunsCard } from "./components/RecentRunsCard";
+import { TrackedLinksCard } from "./components/TrackedLinksCard";
+import { ConnectAccountModal } from "./components/ConnectAccountModal";
+import { CreateRuleModal } from "./components/CreateRuleModal";
+import type { DashboardData } from "./components/types";
+import { Info, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function DashboardPage() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isDraining, setIsDraining] = useState(false);
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
+  const [isRuleOpen, setIsRuleOpen] = useState(false);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const showToast = useCallback((type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dashboard/stats", { cache: "no-store" });
+      if (res.ok) {
+        const json: DashboardData = await res.json();
+        setData(json);
+      }
+    } catch (err: unknown) {
+      console.error("Refresh error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadInitial() {
+      try {
+        const res = await fetch("/api/dashboard/stats", { cache: "no-store" });
+        if (res.ok && active) {
+          const json: DashboardData = await res.json();
+          setData(json);
+        }
+      } catch (err: unknown) {
+        console.error("Dashboard fetch error:", err);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadInitial();
+    const timer = setInterval(() => {
+      void loadInitial();
+    }, 15000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  async function handleToggleKillSwitch() {
+    if (!data) return;
+    const nextState = !data.killSwitchActive;
+    try {
+      const res = await fetch("/api/settings/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: nextState }),
+      });
+      if (res.ok) {
+        setData({ ...data, killSwitchActive: nextState });
+        showToast(
+          nextState ? "error" : "success",
+          nextState
+            ? "Emergency Kill Switch Activated: Outgoing DMs halted."
+            : "Kill Switch Deactivated: Normal operations resumed.",
+        );
+      }
+    } catch {
+      showToast("error", "Failed to update kill switch");
+    }
+  }
+
+  async function handleDrainQueue() {
+    setIsDraining(true);
+    try {
+      const res = await fetch("/api/worker/drain", { method: "POST" });
+      const result = await res.json();
+      if (res.ok) {
+        showToast(
+          "success",
+          `Queue batch drained: ${result.sent} sent, ${result.delayed} delayed, ${result.unknown} safe-halted.`,
+        );
+        void refreshData();
+      } else {
+        showToast("error", result.error || "Failed to drain queue");
+      }
+    } catch (err: unknown) {
+      showToast("error", err instanceof Error ? err.message : "Error draining queue");
+    } finally {
+      setIsDraining(false);
+    }
+  }
+
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-7xl px-3.5 py-5 sm:px-6 sm:py-8 lg:px-8">
+      {/* Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed bottom-4 left-4 right-4 sm:left-auto sm:right-5 sm:bottom-5 sm:max-w-md z-50 flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-medium text-white shadow-2xl transition ${
+            toast.type === "success" ? "bg-emerald-600" : "bg-rose-600"
+          }`}
+        >
+          {toast.type === "success" ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0" />
+          )}
+          <span className="truncate">{toast.message}</span>
+        </div>
+      )}
+
       {/* Header */}
-      <header className="mb-8 border-b border-zinc-800 pb-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              {businessConfig.brand.name} Social Connect
-            </h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Multi-tenant comment-to-DM automation for Instagram creators.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20"
-              role="status"
-              aria-label="Queue status: Active"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
-              SKIP LOCKED Queue Active
+      <Header
+        killSwitchActive={data?.killSwitchActive ?? false}
+        isDraining={isDraining}
+        onToggleKillSwitch={handleToggleKillSwitch}
+        onDrainQueue={handleDrainQueue}
+        onOpenConnectModal={() => setIsConnectOpen(true)}
+        onOpenCreateRuleModal={() => setIsRuleOpen(true)}
+        onRefresh={() => void refreshData()}
+      />
+
+      {/* Meta Policy Notice */}
+      <div className="mb-6 sm:mb-8 rounded-2xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-white to-amber-50/50 p-3.5 sm:p-4 text-xs text-slate-700 shadow-[0_1px_3px_rgba(245,158,11,0.04),0_6px_20px_-4px_rgba(245,158,11,0.06)]">
+        <div className="flex items-start gap-2.5 sm:gap-3">
+          <Info className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+          <p className="leading-relaxed text-slate-600 font-normal">
+            <span className="inline-flex items-center rounded-md bg-amber-100/80 px-2 py-0.5 text-[11px] font-medium text-amber-800 border border-amber-200/80 mr-1.5">
+              Meta Platform Policy
             </span>
-          </div>
-        </div>
-      </header>
-
-      {/* Notice Banner */}
-      <div
-        className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
-        role="region"
-        aria-label="Meta Policy Notice"
-      >
-        <div className="flex items-start gap-3">
-          <span className="text-lg" aria-hidden="true">
-            ℹ️
-          </span>
-          <div>
-            <strong className="font-semibold">Meta Policy Notice:</strong> Commenters who do not
-            already follow your Instagram account will receive automated private replies inside
-            their <em>Message Requests</em> folder rather than their primary inbox.
-          </div>
+            Automated private replies to commenters who do not follow your account are routed to
+            their <em className="text-slate-800 font-medium not-italic">Message Requests</em>{" "}
+            folder. Ensure public replies or post captions instruct users to check their requests
+            folder.
+          </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        {/* Left Column: Accounts & Automations */}
-        <section className="space-y-6 lg:col-span-2">
-          {/* Connected Accounts Card */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <h2 className="text-lg font-semibold text-white">Connected Channel Accounts</h2>
-            <p className="mt-1 text-xs text-zinc-400">
-              Instagram accounts authorized via Instagram Login (AES-256-GCM encrypted tokens).
-            </p>
-
-            <div className="mt-4 divide-y divide-zinc-800">
-              <div className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white font-bold text-sm"
-                    aria-hidden="true"
-                  >
-                    IG
-                  </div>
-                  <div>
-                    <div className="font-medium text-zinc-200">@anozik_creator</div>
-                    <div className="text-xs text-zinc-400">Cap: 600 DMs/hr • Auto-refresh on</div>
-                  </div>
-                </div>
-                <span className="rounded-md bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-400 ring-1 ring-emerald-500/20">
-                  Connected
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Active Automations Card */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <h2 className="text-lg font-semibold text-white">Active Automation Rules</h2>
-            <p className="mt-1 text-xs text-zinc-400">
-              Rules evaluated in memory with strict priority and match hierarchy.
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div
-                tabIndex={0}
-                className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                role="article"
-                aria-label="Rule: Portfolio Delivery DM"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-zinc-200">Portfolio Delivery DM</span>
-                  <span className="text-xs text-zinc-400">Priority 1 • Whole Word</span>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                    portfolio
-                  </span>
-                  <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                    पोर्टफोलियो
-                  </span>
-                  <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                    design
-                  </span>
-                </div>
-                <p className="mt-2 text-xs text-zinc-400">
-                  Target: <code>https://{businessConfig.brand.domain}/u/nitin</code>
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Right Column: Queue Monitor & Safety Controls */}
-        <section className="space-y-6">
-          {/* Emergency Kill Switch */}
-          <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-6">
-            <h2 className="text-lg font-semibold text-red-200">Emergency Safety Controls</h2>
-            <p className="mt-1 text-xs text-red-300/80">
-              Immediately halts all outgoing DMs across the workspace.
-            </p>
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-sm font-medium text-zinc-300">Kill Switch</span>
-              <span className="rounded bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-zinc-400">
-                INACTIVE (Normal Operation)
-              </span>
-            </div>
-          </div>
-
-          {/* Honest Queue Health & Throttle ETA */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <h2 className="text-lg font-semibold text-white">Honest Queue Telemetry</h2>
-            <p className="mt-1 text-xs text-zinc-400">
-              Live status states. Queued items are never falsely displayed as sent.
-            </p>
-
-            <dl className="mt-4 grid grid-cols-2 gap-4">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-                <dt className="text-xs text-zinc-400">Pending Lease</dt>
-                <dd className="mt-1 text-xl font-semibold text-zinc-200">0</dd>
-              </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-                <dt className="text-xs text-zinc-400">Sending Active</dt>
-                <dd className="mt-1 text-xl font-semibold text-amber-400">0</dd>
-              </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-                <dt className="text-xs text-zinc-400">Sent Today</dt>
-                <dd className="mt-1 text-xl font-semibold text-emerald-400">0</dd>
-              </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-                <dt className="text-xs text-zinc-400">Unknown Delivery</dt>
-                <dd className="mt-1 text-xl font-semibold text-purple-400">0</dd>
-              </div>
-            </dl>
-
-            {/* Queue Throttle ETA Display */}
+      {/* Telemetry Stats */}
+      {loading && !data ? (
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5 sm:grid-cols-3 lg:grid-cols-6 mb-6 sm:mb-8 animate-pulse">
+          {[...Array(6)].map((_, i) => (
             <div
-              className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
-              role="status"
-              aria-label="Queue Throttle ETA"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-zinc-300">Throttle ETA</span>
-                <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 ring-1 ring-emerald-500/20">
-                  Paced (Ready)
-                </span>
-              </div>
-              <p className="mt-1.5 text-xs text-zinc-400">
-                When 600/hr cap is hit, runs delay with rolling ETA window.
-              </p>
-            </div>
-          </div>
-        </section>
+              key={i}
+              className="h-24 rounded-2xl border border-slate-200/70 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.03),0_4px_14px_rgba(15,23,42,0.04)]"
+            />
+          ))}
+        </div>
+      ) : data ? (
+        <StatsCards stats={data.stats} />
+      ) : null}
+
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 gap-6 sm:gap-8 lg:grid-cols-3">
+        {/* Left Column: Accounts & Automations */}
+        <div className="space-y-6 lg:col-span-2">
+          <ConnectedAccountsCard
+            accounts={data?.accounts ?? []}
+            onOpenConnectModal={() => setIsConnectOpen(true)}
+            onAccountDeleted={() => {
+              showToast("success", "Account disconnected");
+              void refreshData();
+            }}
+          />
+
+          <AutomationRulesCard
+            rules={data?.rules ?? []}
+            onOpenCreateRuleModal={() => setIsRuleOpen(true)}
+            onRuleUpdated={() => {
+              showToast("success", "Automation rule updated");
+              void refreshData();
+            }}
+          />
+        </div>
+
+        {/* Right Column: Feed & Analytics */}
+        <div className="space-y-6">
+          <RecentRunsCard runs={data?.recentRuns ?? []} />
+          <TrackedLinksCard links={data?.links ?? []} />
+        </div>
       </div>
+
+      {/* Modals */}
+      <ConnectAccountModal
+        isOpen={isConnectOpen}
+        onClose={() => setIsConnectOpen(false)}
+        onConnected={() => {
+          showToast("success", "Account successfully connected!");
+          void refreshData();
+        }}
+      />
+
+      <CreateRuleModal
+        isOpen={isRuleOpen}
+        accounts={data?.accounts ?? []}
+        onClose={() => setIsRuleOpen(false)}
+        onRuleCreated={() => {
+          showToast("success", "Automation rule created successfully!");
+          void refreshData();
+        }}
+      />
     </main>
   );
 }
