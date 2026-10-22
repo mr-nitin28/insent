@@ -25,14 +25,11 @@ export class InstagramChannelAdapter implements ChannelAdapter {
       throw new Error("Invalid Meta webhook signature");
     }
 
-    let parsedJson: unknown;
     try {
-      parsedJson = JSON.parse(rawBody);
+      return instagramWebhookSchema.parse(JSON.parse(rawBody));
     } catch {
       throw new Error("Invalid JSON webhook payload");
     }
-
-    return instagramWebhookSchema.parse(parsedJson);
   }
 
   normalize(payload: unknown): InboundEvent[] {
@@ -44,32 +41,23 @@ export class InstagramChannelAdapter implements ChannelAdapter {
       for (const change of entry.changes) {
         if (change.field === "comments" && change.value) {
           const val = change.value;
-          const commenterId = val.from?.id ?? "";
-          const commenterUsername = val.from?.username ?? "";
-          const postId = val.media?.id ?? "";
-          const commentId = val.id;
-          const commentText = val.text ?? "";
-          const parentId = val.parent_id ?? null;
-          const timestamp = val.created_time ? new Date(val.created_time * 1000) : new Date();
-
-          if (commentId && accountId) {
+          if (val.id && accountId) {
             events.push({
               channelId: this.id,
               accountId,
-              commentId,
-              commenterId,
-              commenterUsername,
-              commentText,
-              postId,
-              parentId,
-              timestamp,
+              commentId: val.id,
+              commenterId: val.from?.id ?? "",
+              commenterUsername: val.from?.username ?? "",
+              commentText: val.text ?? "",
+              postId: val.media?.id ?? "",
+              parentId: val.parent_id ?? null,
+              timestamp: val.created_time ? new Date(val.created_time * 1000) : new Date(),
               rawEvent: change,
             });
           }
         }
       }
     }
-
     return events;
   }
 
@@ -87,7 +75,6 @@ export class InstagramChannelAdapter implements ChannelAdapter {
       };
     } catch (err: unknown) {
       if (err instanceof MetaApiError) {
-        // Code 190: Token expired or revoked
         if (err.code === 190) {
           return {
             type: "failed",
@@ -96,8 +83,6 @@ export class InstagramChannelAdapter implements ChannelAdapter {
             reason: "Instagram access token expired or revoked (Meta 190)",
           };
         }
-
-        // Code 368, 4, 17: Rate limits
         if (err.code === 368 || err.code === 4 || err.code === 17) {
           return {
             type: "retry",
@@ -105,17 +90,14 @@ export class InstagramChannelAdapter implements ChannelAdapter {
             reason: `Meta rate limit encountered (Code ${err.code})`,
           };
         }
-
-        // Code 100 / Subcode 10900: Comment already replied to
         if (err.code === 100 && (err.subcode === 10900 || err.message.includes("already"))) {
           return {
             type: "failed",
             permanent: true,
+            isDuplicate: true,
             reason: "Comment has already been replied to on Meta platform",
           };
         }
-
-        // Code 1: Generic unconfirmed error (DM might have been delivered)
         if (err.code === 1) {
           return {
             type: "unknown",
@@ -123,8 +105,6 @@ export class InstagramChannelAdapter implements ChannelAdapter {
           };
         }
       }
-
-      // Timeouts / Network failures: outcome unconfirmed
       const message = err instanceof Error ? err.message : String(err);
       return {
         type: "unknown",
@@ -144,17 +124,10 @@ export class InstagramChannelAdapter implements ChannelAdapter {
         text,
         account.decryptedAccessToken,
       );
-      return {
-        type: "sent",
-        messageId: res.id,
-      };
+      return { type: "sent", messageId: res.id };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return {
-        type: "failed",
-        permanent: false,
-        reason: `Public reply failed: ${message}`,
-      };
+      return { type: "failed", permanent: false, reason: `Public reply failed: ${message}` };
     }
   }
 
@@ -163,17 +136,11 @@ export class InstagramChannelAdapter implements ChannelAdapter {
   }
 
   async completeConnect(code: string): Promise<ConnectedAccount> {
-    // 1. Exchange auth code for short token
     const shortTokenRes = await metaClient.exchangeCodeForShortToken(code);
-
-    // 2. Exchange short token for long-lived 60-day token
     const longTokenRes = await metaClient.exchangeShortForLongToken(shortTokenRes.access_token);
     const accessToken = longTokenRes.access_token;
-
-    // 3. Fetch profile
     const profile = await metaClient.getMe(accessToken);
 
-    // 4. Subscribe account to webhooks
     try {
       await metaClient.subscribeAccountToWebhooks(profile.id, accessToken);
     } catch (subErr) {
@@ -209,9 +176,6 @@ export class InstagramChannelAdapter implements ChannelAdapter {
     }
   }
 
-  /**
-   * Polling fallback for development accounts without live comments webhook approval.
-   */
   async pollMediaComments(account: AccountCredentials, mediaId: string): Promise<InboundEvent[]> {
     const res = await metaClient.fetchMediaComments(mediaId, account.decryptedAccessToken);
     return res.data.map((item) => ({

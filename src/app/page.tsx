@@ -15,7 +15,11 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20"
+              role="status"
+              aria-label="Queue status: Active"
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
               SKIP LOCKED Queue Active
             </span>
@@ -24,9 +28,15 @@ export default function DashboardPage() {
       </header>
 
       {/* Notice Banner */}
-      <div className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+      <div
+        className="mb-8 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
+        role="region"
+        aria-label="Meta Policy Notice"
+      >
         <div className="flex items-start gap-3">
-          <span className="text-lg">ℹ️</span>
+          <span className="text-lg" aria-hidden="true">
+            ℹ️
+          </span>
           <div>
             <strong className="font-semibold">Meta Policy Notice:</strong> Commenters who do not
             already follow your Instagram account will receive automated private replies inside
@@ -48,7 +58,10 @@ export default function DashboardPage() {
             <div className="mt-4 divide-y divide-zinc-800">
               <div className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white font-bold text-sm">
+                  <div
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white font-bold text-sm"
+                    aria-hidden="true"
+                  >
                     IG
                   </div>
                   <div>
@@ -71,7 +84,12 @@ export default function DashboardPage() {
             </p>
 
             <div className="mt-4 space-y-3">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+              <div
+                tabIndex={0}
+                className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                role="article"
+                aria-label="Rule: Portfolio Delivery DM"
+              >
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-zinc-200">Portfolio Delivery DM</span>
                   <span className="text-xs text-zinc-400">Priority 1 • Whole Word</span>
@@ -111,7 +129,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Honest Queue Health */}
+          {/* Honest Queue Health & Throttle ETA */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <h2 className="text-lg font-semibold text-white">Honest Queue Telemetry</h2>
             <p className="mt-1 text-xs text-zinc-400">
@@ -136,6 +154,23 @@ export default function DashboardPage() {
                 <dd className="mt-1 text-xl font-semibold text-purple-400">0</dd>
               </div>
             </dl>
+
+            {/* Queue Throttle ETA Display */}
+            <div
+              className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
+              role="status"
+              aria-label="Queue Throttle ETA"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-zinc-300">Throttle ETA</span>
+                <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 ring-1 ring-emerald-500/20">
+                  Paced (Ready)
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-400">
+                When 600/hr cap is hit, runs delay with rolling ETA window.
+              </p>
+            </div>
           </div>
         </section>
       </div>

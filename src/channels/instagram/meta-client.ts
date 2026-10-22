@@ -52,7 +52,6 @@ async function handleMetaResponse<T>(res: Response, callContext: string): Promis
     const errorType = errorObj?.type;
     const fbTraceId = errorObj?.fbtrace_id;
 
-    // Structured JSON log: NEVER log access tokens
     console.error(
       JSON.stringify({
         event: "meta_api_error",
@@ -119,7 +118,6 @@ export const metaClient = {
       redirect_uri: `${env.NEXT_PUBLIC_APP_URL}/api/oauth/callback`,
       code,
     });
-
     const res = await fetch("https://api.instagram.com/oauth/access_token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -134,8 +132,7 @@ export const metaClient = {
       client_secret: env.INSTAGRAM_APP_SECRET,
       access_token: shortToken,
     });
-    const url = `${getGraphUrl("/access_token")}?${params.toString()}`;
-    const res = await fetch(url);
+    const res = await fetch(`${getGraphUrl("/access_token")}?${params.toString()}`);
     return handleMetaResponse<MetaTokenResponse>(res, "exchangeShortForLongToken");
   },
 
@@ -144,8 +141,7 @@ export const metaClient = {
       grant_type: "ig_refresh_token",
       access_token: longToken,
     });
-    const url = `${getGraphUrl("/refresh_access_token")}?${params.toString()}`;
-    const res = await fetch(url);
+    const res = await fetch(`${getGraphUrl("/refresh_access_token")}?${params.toString()}`);
     return handleMetaResponse<MetaTokenResponse>(res, "refreshLongToken");
   },
 
@@ -154,21 +150,16 @@ export const metaClient = {
       fields: "id,username,name,profile_picture_url",
       access_token: accessToken,
     });
-    const url = `${getGraphUrl("/me")}?${params.toString()}`;
-    const res = await fetch(url);
+    const res = await fetch(`${getGraphUrl("/me")}?${params.toString()}`);
     return handleMetaResponse<MetaProfileResponse>(res, "getMe");
   },
 
-  async subscribeAccountToWebhooks(
-    igUserId: string,
-    accessToken: string,
-  ): Promise<{ success: boolean }> {
+  async subscribeAccountToWebhooks(igUserId: string, token: string): Promise<{ success: boolean }> {
     const form = new URLSearchParams({
       subscribed_fields: "comments,messages",
-      access_token: accessToken,
+      access_token: token,
     });
-    const url = getGraphUrl(`/${igUserId}/subscribed_apps`);
-    const res = await fetch(url, {
+    const res = await fetch(getGraphUrl(`/${igUserId}/subscribed_apps`), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -182,17 +173,10 @@ export const metaClient = {
     text: string,
     accessToken: string,
   ): Promise<MetaSendResponse> {
-    const url = getGraphUrl(`/${igUserId}/messages`);
-    const res = await fetch(url, {
+    const res = await fetch(getGraphUrl(`/${igUserId}/messages`), {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        recipient: { comment_id: commentId },
-        message: { text },
-      }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text } }),
     });
     return handleMetaResponse<MetaSendResponse>(res, "sendPrivateReply");
   },
@@ -202,12 +186,8 @@ export const metaClient = {
     message: string,
     accessToken: string,
   ): Promise<{ id: string }> {
-    const url = getGraphUrl(`/${commentId}/replies`);
-    const form = new URLSearchParams({
-      message,
-      access_token: accessToken,
-    });
-    const res = await fetch(url, {
+    const form = new URLSearchParams({ message, access_token: accessToken });
+    const res = await fetch(getGraphUrl(`/${commentId}/replies`), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -215,16 +195,12 @@ export const metaClient = {
     return handleMetaResponse<{ id: string }>(res, "replyToCommentPublicly");
   },
 
-  async fetchMediaComments(
-    mediaId: string,
-    accessToken: string,
-  ): Promise<{ data: MetaCommentItem[] }> {
+  async fetchMediaComments(mediaId: string, token: string): Promise<{ data: MetaCommentItem[] }> {
     const params = new URLSearchParams({
       fields: "id,text,timestamp,from,parent_id",
-      access_token: accessToken,
+      access_token: token,
     });
-    const url = `${getGraphUrl(`/${mediaId}/comments`)}?${params.toString()}`;
-    const res = await fetch(url);
+    const res = await fetch(`${getGraphUrl(`/${mediaId}/comments`)}?${params.toString()}`);
     return handleMetaResponse<{ data: MetaCommentItem[] }>(res, "fetchMediaComments");
   },
 };

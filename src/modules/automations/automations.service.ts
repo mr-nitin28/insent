@@ -1,9 +1,10 @@
 /**
- * Automations service with 30-second in-memory rule caching.
+ * Automations service with 30-second in-memory rule caching,
+ * rule creation collision guards, and account pause triggers.
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
-import type { AutomationRule } from "@/core/rules";
+import { validateRuleOverlap, type AutomationRule } from "@/core/rules";
 import type { MatchMode } from "@/core/matching";
 
 interface CacheEntry {
@@ -72,6 +73,72 @@ export const automationsService = {
     });
 
     return rules;
+  },
+
+  async createRule(candidate: Omit<AutomationRule, "id" | "version">): Promise<AutomationRule> {
+    const existingRules = await this.getActiveRulesForAccount(candidate.accountId);
+    const candidateRule: AutomationRule = {
+      ...candidate,
+      id: "candidate",
+      version: 1,
+    };
+
+    // Rejects overlapping rules with identical keywords and scopes
+    validateRuleOverlap(candidateRule, existingRules);
+
+    const { data, error } = await supabaseAdmin
+      .from("automation_rules")
+      .insert({
+        workspace_id: candidate.workspaceId,
+        account_id: candidate.accountId,
+        name: candidate.name,
+        priority: candidate.priority,
+        match_mode: candidate.matchMode,
+        keywords: candidate.keywords,
+        post_scope: candidate.postScope,
+        destination_ref: candidate.destinationRef,
+        message_template: candidate.messageTemplate,
+        public_reply_template: candidate.publicReplyTemplate ?? null,
+        status: candidate.status,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create automation rule: ${error.message}`);
+    }
+
+    this.clearAccountCache(candidate.accountId);
+
+    const row = data as AutomationRuleRow;
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      accountId: row.account_id,
+      name: row.name,
+      priority: row.priority,
+      matchMode: row.match_mode as MatchMode,
+      keywords: row.keywords,
+      postScope: row.post_scope,
+      destinationRef: row.destination_ref,
+      messageTemplate: row.message_template,
+      publicReplyTemplate: row.public_reply_template,
+      status: row.status as "active" | "paused",
+      version: row.version,
+    };
+  },
+
+  async pauseRulesForAccount(accountId: string): Promise<void> {
+    const { error } = await supabaseAdmin
+      .from("automation_rules")
+      .update({ status: "paused", updated_at: new Date().toISOString() })
+      .eq("account_id", accountId);
+
+    if (error) {
+      throw new Error(`Failed to pause rules for account: ${error.message}`);
+    }
+
+    this.clearAccountCache(accountId);
   },
 
   clearAccountCache(accountId: string): void {

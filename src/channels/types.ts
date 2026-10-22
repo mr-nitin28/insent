@@ -32,6 +32,7 @@ export type SendResult =
       readonly reason: string;
       readonly permanent: boolean;
       readonly requiresReauth?: boolean;
+      readonly isDuplicate?: boolean;
     }
   | { readonly type: "unknown"; readonly reason: string };
 
