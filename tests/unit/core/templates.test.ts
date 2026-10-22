@@ -18,9 +18,9 @@ describe("core/templates", () => {
 
   it("rejects unauthorized variables and throws UnknownVariableError", () => {
     const template = "Hey @{username}, your secret key is {secret_key}";
-    expect(() =>
-      renderTemplate(template, { username: "alice" }, "Disclosure")
-    ).toThrow(UnknownVariableError);
+    expect(() => renderTemplate(template, { username: "alice" }, "Disclosure")).toThrow(
+      UnknownVariableError,
+    );
   });
 
   it("appends disclosure text cleanly", () => {
@@ -28,15 +28,13 @@ describe("core/templates", () => {
     const rendered = renderTemplate(
       template,
       { link: "https://anozik.com" },
-      "Sent via Anozik Social Connect"
+      "Sent via Anozik Social Connect",
     );
     expect(rendered.endsWith("Sent via Anozik Social Connect")).toBe(true);
   });
 
   it("throws TemplateTooLongError when rendered text exceeds limit", () => {
     const longTemplate = "A".repeat(100);
-    expect(() =>
-      renderTemplate(longTemplate, {}, "Disclosure", 50)
-    ).toThrow(TemplateTooLongError);
+    expect(() => renderTemplate(longTemplate, {}, "Disclosure", 50)).toThrow(TemplateTooLongError);
   });
 });

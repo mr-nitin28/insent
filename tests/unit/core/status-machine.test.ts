@@ -18,21 +18,17 @@ describe("core/status-machine", () => {
     });
 
     it("blocks illegal transition from terminal state sent -> pending", () => {
-      expect(() => transitionRunStatus("sent", "pending")).toThrow(
-        InvalidStateTransitionError
-      );
+      expect(() => transitionRunStatus("sent", "pending")).toThrow(InvalidStateTransitionError);
     });
 
     it("blocks illegal transition from terminal unknown_delivery -> pending", () => {
       expect(() => transitionRunStatus("unknown_delivery", "pending")).toThrow(
-        InvalidStateTransitionError
+        InvalidStateTransitionError,
       );
     });
 
     it("blocks illegal transition from terminal skipped -> sending", () => {
-      expect(() => transitionRunStatus("skipped", "sending")).toThrow(
-        InvalidStateTransitionError
-      );
+      expect(() => transitionRunStatus("skipped", "sending")).toThrow(InvalidStateTransitionError);
     });
   });
 

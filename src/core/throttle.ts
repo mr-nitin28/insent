@@ -23,7 +23,7 @@ export function evaluateThrottle(
   sendsInLastHour: number,
   hourlyCap: number,
   now = new Date(),
-  backoffSeconds = 300
+  backoffSeconds = 300,
 ): ThrottleAction {
   if (sendsInLastHour < hourlyCap) {
     return { action: "send_now" };

@@ -4,13 +4,7 @@
 
 import { InvalidStateTransitionError } from "./errors";
 
-export type RunStatus =
-  | "pending"
-  | "sending"
-  | "sent"
-  | "skipped"
-  | "failed"
-  | "unknown_delivery";
+export type RunStatus = "pending" | "sending" | "sent" | "skipped" | "failed" | "unknown_delivery";
 
 const VALID_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   pending: ["sending", "skipped"],
@@ -52,7 +46,7 @@ export function calculateRetryPlan(
   currentAttempts: number,
   maxAttempts = 4,
   baseDelaySeconds = 60,
-  jitterSeed = 0.5
+  jitterSeed = 0.5,
 ): RetryPlan {
   if (currentAttempts >= maxAttempts) {
     return { shouldRetry: false };
@@ -96,7 +90,7 @@ export interface OutcomeClassification {
 export function classifyChannelOutcome(
   outcomeType: ChannelOutcomeType,
   currentAttempts: number,
-  maxAttempts = 4
+  maxAttempts = 4,
 ): OutcomeClassification {
   switch (outcomeType) {
     case "sent":

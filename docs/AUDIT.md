@@ -1,6 +1,7 @@
 # Comprehensive Audit of Reference Repositories
 
 This document audits the four reference open-source projects for Instagram comment-to-DM automation:
+
 1. `instachat-main`
 2. `instagram-comment-to-dm-main` (CampaignCue)
 3. `insta-p8-main`
@@ -11,6 +12,7 @@ This document audits the four reference open-source projects for Instagram comme
 ## 1. Per-Repository Deep Dive
 
 ### 1.1 `instachat-main`
+
 - **Stack & Structure:** Next.js 16 (App Router), React 19, Supabase (PostgreSQL), Tailwind CSS v4, TypeScript 5. Minimal dependencies (zero Redis, zero BullMQ). Structure: `app/api/` (cron, media, oauth, webhook), `lib/` (ig, process, queue, engine, matching, messages, crypto, env), `supabase/` (`schema.sql`, `cron.sql`).
 - **License:** MIT (Copyright (c) 2026 Chutzpah-Clickesef).
 - **Main Features:** Comment-to-DM private replies, optional randomized public replies, story reply handling, basic DM triggers, quick reply buttons with 24-hour window tracking, scheduled followups.
@@ -27,6 +29,7 @@ This document audits the four reference open-source projects for Instagram comme
 ---
 
 ### 1.2 `instagram-comment-to-dm-main` (CampaignCue)
+
 - **Stack & Structure:** Next.js 16 (App Router), Prisma ORM, PostgreSQL, BullMQ, ioredis, NextAuth v5, Stripe SDK, Vitest. Structure: `app/api/` (admin, auth, automations, billing, webhook, etc.), `lib/` (meta, queue, utils, billing, tracking, ops), `worker/` (`dm-worker.ts`), `prisma/`.
 - **License:** MIT (Copyright (c) 2026 Anish Raj).
 - **Main Features:** Instagram comment-to-DM, tracked link generation and click logging, multi-tenant workspace management, Stripe subscription and usage enforcement.
@@ -43,6 +46,7 @@ This document audits the four reference open-source projects for Instagram comme
 ---
 
 ### 1.3 `insta-p8-main`
+
 - **Stack & Structure:** Next.js 16 (App Router), Supabase, Radix UI / shadcn, Groq SDK, Lucide. Structure: `app/api/` (automations, groq, ice-breakers, inbox, instagram), `components/`, `lib/` (instagram-api, ai-reply, etc.).
 - **License:** MIT (Copyright (c) 2026 flexhunt).
 - **Main Features:** Comment-to-DM, follow-gate check (`is_user_follow_business`), Groq LLM-powered automatic replies, rich card templates, typing indicators.
@@ -59,6 +63,7 @@ This document audits the four reference open-source projects for Instagram comme
 ---
 
 ### 1.4 `openreply-main`
+
 - **Stack & Structure:** Next.js 16 (App Router), Prisma, BullMQ, ioredis, NextAuth v5, Vitest. Structure: `app/`, `lib/` (instagram, queue, utils, tracking, zernio), `worker/`.
 - **License:** MIT (Copyright (c) 2026 Anish Raj & Diwen Huang).
 - **Main Features:** Follow-gate check with delayed re-checks, comment-to-DM, tracked links, robust delivery error classification, production-hardened keyword matcher.
@@ -75,25 +80,25 @@ This document audits the four reference open-source projects for Instagram comme
 
 ## 2. Cross-Repository Comparison Table
 
-| Dimension | `instachat` | `instagram-comment-to-dm` | `insta-p8` | `openreply` | **ANOZIK SOCIAL CONNECT (Target)** |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Login Flow** | Instagram API with Instagram Login (`graph.instagram.com`) | Facebook Login for Business (`graph.facebook.com`) | Instagram Login (`graph.instagram.com`) | Instagram Login + Facebook Graph mix | **Instagram API with Instagram Login (`graph.instagram.com`)** |
-| **Graph API Version** | Pinned `v25.0` (speculative) | Dynamic env, defaults `v21.0` | Pinned `v21.0` | Dynamic env, defaults `v21.0` | **Configurable env, default official baseline (`v22.0`)** |
-| **Webhook Signature** | Constant-time `timingSafeEqual` on raw body | `timingSafeEqual` on raw body | `timingSafeEqual` on raw body, has bypass flag | `timingSafeEqual` on raw body | **Strict constant-time HMAC-SHA256, no bypass flag** |
-| **Token Storage** | Plain text in DB | AES-256-GCM encrypted | Plain text in DB | AES-256-GCM encrypted | **AES-256-GCM encrypted with key from env, never browser-readable** |
-| **Token Refresh** | Refresh endpoint called on cron | Implemented via helper | Incomplete | Implemented via helper | **Automated scheduled token refresh with expiry tracking** |
-| **Queue Architecture** | Postgres `SKIP LOCKED` (zero external queue) | BullMQ + Redis + standalone worker | In-band synchronous (no queue) | BullMQ + Redis + standalone worker | **Postgres `FOR UPDATE SKIP LOCKED` (zero Redis, low cost, serverless-friendly)** |
-| **Duplicate Guard** | Partial unique index on `queue (comment_id)` | Unique `(automationId, commentId)` (flawed) | None (duplicate webhooks double-send) | BullMQ job deduplication | **Unique constraint `(account_id, comment_id)` at DB level** |
-| **1-Reply Policy** | Strictly enforced by unique partial index | Violated if multiple automations match | Not enforced | Enforced in worker logic | **Guaranteed: exactly 1 rule matched per comment, unique DB constraint** |
-| **7-Day Window** | Not checked in worker | Not checked in worker | Not checked in worker | Not checked in worker | **Checked in worker: comments > 6.5 days rejected with reason** |
-| **Hourly Account Cap** | Yes (counts rows in last hour) | Yes (Redis sliding window) | No | Yes (Redis sliding window) | **Yes (tracked in DB table / throttle logic, delay when capped)** |
-| **Loop Guard** | Drops `from.id == account.id` | Drops `from.id == account.id` | Drops `from.id == account.id` | Drops `from.id == account.id` | **Drops own comments AND drops comment replies (V1)** |
-| **Multi-Tenancy** | None (single tenant `id = 1`) | Application-level `workspaceId` (no RLS) | Minimal / single user | Application-level `workspaceId` (no RLS) | **Full multi-tenancy: `workspace_id` + Supabase RLS on all tables** |
-| **Billing Coupling** | None | High (Stripe reservation inside worker) | None | Medium (workspace usage checks) | **Zero billing in core (pluggable via config/destinations)** |
-| **Hidden Costs** | Free/cheap (runs within Vercel + Supabase) | Expensive (requires Redis + always-on worker) | Cheap (but breaks under traffic) | Expensive (requires Redis + always-on worker) | **Free/cheap ($0 idle cost: serverless Next.js + Supabase)** |
-| **Error Classification** | Basic 4xx vs 5xx | Maps Meta codes to error classes | Logs error to console | Deep: separates confirmed rejections from `unknown_delivery` | **Deep classification: timeouts & crashes -> `unknown_delivery`, never auto-resent** |
-| **Matching Engine** | Basic substring / exact | Word match with basic regex | Substring with regex | Sophisticated Unicode, diacritics & Devanagari support | **Unicode NFKC, Devanagari safe, Latin diacritics, exact/word/contains** |
-| **Test Coverage** | 0 tests | 13 test suites | 0 tests | Comprehensive tests | **100% core domain coverage, adapter mock tests, E2E simulated test** |
+| Dimension                | `instachat`                                                | `instagram-comment-to-dm`                          | `insta-p8`                                     | `openreply`                                                  | **ANOZIK SOCIAL CONNECT (Target)**                                                   |
+| :----------------------- | :--------------------------------------------------------- | :------------------------------------------------- | :--------------------------------------------- | :----------------------------------------------------------- | :----------------------------------------------------------------------------------- |
+| **Login Flow**           | Instagram API with Instagram Login (`graph.instagram.com`) | Facebook Login for Business (`graph.facebook.com`) | Instagram Login (`graph.instagram.com`)        | Instagram Login + Facebook Graph mix                         | **Instagram API with Instagram Login (`graph.instagram.com`)**                       |
+| **Graph API Version**    | Pinned `v25.0` (speculative)                               | Dynamic env, defaults `v21.0`                      | Pinned `v21.0`                                 | Dynamic env, defaults `v21.0`                                | **Configurable env, default official baseline (`v22.0`)**                            |
+| **Webhook Signature**    | Constant-time `timingSafeEqual` on raw body                | `timingSafeEqual` on raw body                      | `timingSafeEqual` on raw body, has bypass flag | `timingSafeEqual` on raw body                                | **Strict constant-time HMAC-SHA256, no bypass flag**                                 |
+| **Token Storage**        | Plain text in DB                                           | AES-256-GCM encrypted                              | Plain text in DB                               | AES-256-GCM encrypted                                        | **AES-256-GCM encrypted with key from env, never browser-readable**                  |
+| **Token Refresh**        | Refresh endpoint called on cron                            | Implemented via helper                             | Incomplete                                     | Implemented via helper                                       | **Automated scheduled token refresh with expiry tracking**                           |
+| **Queue Architecture**   | Postgres `SKIP LOCKED` (zero external queue)               | BullMQ + Redis + standalone worker                 | In-band synchronous (no queue)                 | BullMQ + Redis + standalone worker                           | **Postgres `FOR UPDATE SKIP LOCKED` (zero Redis, low cost, serverless-friendly)**    |
+| **Duplicate Guard**      | Partial unique index on `queue (comment_id)`               | Unique `(automationId, commentId)` (flawed)        | None (duplicate webhooks double-send)          | BullMQ job deduplication                                     | **Unique constraint `(account_id, comment_id)` at DB level**                         |
+| **1-Reply Policy**       | Strictly enforced by unique partial index                  | Violated if multiple automations match             | Not enforced                                   | Enforced in worker logic                                     | **Guaranteed: exactly 1 rule matched per comment, unique DB constraint**             |
+| **7-Day Window**         | Not checked in worker                                      | Not checked in worker                              | Not checked in worker                          | Not checked in worker                                        | **Checked in worker: comments > 6.5 days rejected with reason**                      |
+| **Hourly Account Cap**   | Yes (counts rows in last hour)                             | Yes (Redis sliding window)                         | No                                             | Yes (Redis sliding window)                                   | **Yes (tracked in DB table / throttle logic, delay when capped)**                    |
+| **Loop Guard**           | Drops `from.id == account.id`                              | Drops `from.id == account.id`                      | Drops `from.id == account.id`                  | Drops `from.id == account.id`                                | **Drops own comments AND drops comment replies (V1)**                                |
+| **Multi-Tenancy**        | None (single tenant `id = 1`)                              | Application-level `workspaceId` (no RLS)           | Minimal / single user                          | Application-level `workspaceId` (no RLS)                     | **Full multi-tenancy: `workspace_id` + Supabase RLS on all tables**                  |
+| **Billing Coupling**     | None                                                       | High (Stripe reservation inside worker)            | None                                           | Medium (workspace usage checks)                              | **Zero billing in core (pluggable via config/destinations)**                         |
+| **Hidden Costs**         | Free/cheap (runs within Vercel + Supabase)                 | Expensive (requires Redis + always-on worker)      | Cheap (but breaks under traffic)               | Expensive (requires Redis + always-on worker)                | **Free/cheap ($0 idle cost: serverless Next.js + Supabase)**                         |
+| **Error Classification** | Basic 4xx vs 5xx                                           | Maps Meta codes to error classes                   | Logs error to console                          | Deep: separates confirmed rejections from `unknown_delivery` | **Deep classification: timeouts & crashes -> `unknown_delivery`, never auto-resent** |
+| **Matching Engine**      | Basic substring / exact                                    | Word match with basic regex                        | Substring with regex                           | Sophisticated Unicode, diacritics & Devanagari support       | **Unicode NFKC, Devanagari safe, Latin diacritics, exact/word/contains**             |
+| **Test Coverage**        | 0 tests                                                    | 13 test suites                                     | 0 tests                                        | Comprehensive tests                                          | **100% core domain coverage, adapter mock tests, E2E simulated test**                |
 
 ---
 
@@ -116,6 +121,7 @@ This document audits the four reference open-source projects for Instagram comme
 ## 4. KEEP the Idea, REJECT the Pattern
 
 ### KEEP the Idea:
+
 - **`instachat-main` — Postgres `SKIP LOCKED` queueing:** Eliminates Redis and background workers by leveraging relational database concurrency primitives.
 - **`instachat-main` — Next.js `after()` queue kick:** Returns HTTP 200 to Meta immediately while initiating asynchronous background sending without holding the HTTP connection.
 - **`openreply-main` — `unknown_delivery` error classification:** Treats ambiguous send responses as unconfirmed rather than retrying, preventing duplicate DM spam storms.
@@ -124,6 +130,7 @@ This document audits the four reference open-source projects for Instagram comme
 - **`instagram-comment-to-dm-main` — Tracked link redirector:** Distinguishes preview crawler bots from human clicks and measures campaign conversion.
 
 ### REJECT the Pattern:
+
 - **`instachat-main` — Single-tenant hardcoded schema (`id = 1`):** Rejected because platform must serve multiple creator workspaces seamlessly.
 - **`instachat-main` — Stale job reset directly to pending:** Rejected because re-sending after worker crash causes duplicate messages; must transition to `unknown_delivery`.
 - **`instachat-main` & `insta-p8-main` — Plain text access tokens:** Rejected due to severe data leak risk if database backups or snapshots are compromised.

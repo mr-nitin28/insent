@@ -48,7 +48,7 @@ export function doScopesOverlap(scopeA: string | null, scopeB: string | null): b
  */
 export function validateRuleOverlap(
   candidate: AutomationRule,
-  existingRules: readonly AutomationRule[]
+  existingRules: readonly AutomationRule[],
 ): void {
   for (const existing of existingRules) {
     if (existing.id === candidate.id) continue;
@@ -75,10 +75,10 @@ export function validateRuleOverlap(
 export function chooseRule(
   commentText: string,
   postId: string,
-  rules: readonly AutomationRule[]
+  rules: readonly AutomationRule[],
 ): MatchedRuleResult | null {
   const applicableRules = rules.filter(
-    (r) => r.status === "active" && (r.postScope === null || r.postScope === postId)
+    (r) => r.status === "active" && (r.postScope === null || r.postScope === postId),
   );
 
   const candidates: MatchedRuleResult[] = [];

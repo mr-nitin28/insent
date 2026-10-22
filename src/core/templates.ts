@@ -31,7 +31,7 @@ export function renderTemplate(
   template: string,
   context: RenderContext,
   disclosureText?: string,
-  maxLength = 1000
+  maxLength = 1000,
 ): string {
   // Check for unauthorized variable patterns
   const variableRegex = /\{([a-zA-Z0-9_]+)\}/g;

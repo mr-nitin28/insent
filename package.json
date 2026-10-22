@@ -17,8 +17,8 @@
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
-    "simulate": "tsx scripts/simulate-webhook.ts",
-    "seed": "tsx scripts/seed.ts"
+    "simulate": "tsx --env-file=.env.example scripts/simulate-webhook.ts",
+    "seed": "tsx --env-file=.env.example scripts/seed.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",

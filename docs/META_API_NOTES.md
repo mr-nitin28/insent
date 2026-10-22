@@ -101,15 +101,15 @@ This document captures verified facts and operational baselines for the Meta Ins
 
 ## 7. Error Classification & Meta Status Mapping
 
-| Meta Code | Subcode | Nature | Classification | Action |
-| :--- | :--- | :--- | :--- | :--- |
-| **190** | - | Invalid OAuth / Token Expired | `FAILED_AUTH` | Mark account `needs_reauth`, pause active rules |
-| **368** | - | Meta Platform Rate Limit | `RETRYABLE_RATE_LIMIT` | Delay queue item with exponential backoff |
-| **4 / 17** | - | Application Rate Limit | `RETRYABLE_RATE_LIMIT` | Delay queue item with exponential backoff |
-| **100** | 10900 | Comment already replied to | `SKIPPED_DUPLICATE` | Mark run `skipped` (terminal) |
-| **100** | - | Invalid Parameter / Comment not found | `FAILED_PERMANENT` | Mark run `failed` (terminal) |
-| **1** | - | Generic OAuth Exception (Unconfirmed) | `UNKNOWN_DELIVERY` | **NEVER** retry. DM may have been delivered. |
-| **5xx / Timeout** | - | Network / Upstream failure mid-flight | `UNKNOWN_DELIVERY` | **NEVER** auto-retry. Mark `unknown_delivery`. |
+| Meta Code         | Subcode | Nature                                | Classification         | Action                                          |
+| :---------------- | :------ | :------------------------------------ | :--------------------- | :---------------------------------------------- |
+| **190**           | -       | Invalid OAuth / Token Expired         | `FAILED_AUTH`          | Mark account `needs_reauth`, pause active rules |
+| **368**           | -       | Meta Platform Rate Limit              | `RETRYABLE_RATE_LIMIT` | Delay queue item with exponential backoff       |
+| **4 / 17**        | -       | Application Rate Limit                | `RETRYABLE_RATE_LIMIT` | Delay queue item with exponential backoff       |
+| **100**           | 10900   | Comment already replied to            | `SKIPPED_DUPLICATE`    | Mark run `skipped` (terminal)                   |
+| **100**           | -       | Invalid Parameter / Comment not found | `FAILED_PERMANENT`     | Mark run `failed` (terminal)                    |
+| **1**             | -       | Generic OAuth Exception (Unconfirmed) | `UNKNOWN_DELIVERY`     | **NEVER** retry. DM may have been delivered.    |
+| **5xx / Timeout** | -       | Network / Upstream failure mid-flight | `UNKNOWN_DELIVERY`     | **NEVER** auto-retry. Mark `unknown_delivery`.  |
 
 ---
 

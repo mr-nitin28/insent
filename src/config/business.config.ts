@@ -40,7 +40,7 @@ export const businessConfigSchema = z.object({
         maxAccounts: z.number().int(),
         maxAutomations: z.number().int(),
         monthlyDmCap: z.number().int(),
-      })
+      }),
     )
     .optional(),
 });

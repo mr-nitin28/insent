@@ -22,6 +22,7 @@ anozik-social-connect/
 ```
 
 ### Architectural Invariants:
+
 1. **Pure Core:** `src/core/` is completely pure. It performs zero I/O, imports no third-party network libraries or sibling directories, and contains pure business domain logic.
 2. **Thin Web Layer:** `src/app/` contains no business logic. Route handlers validate inputs with Zod, invoke a module service, and return standard JSON or HTTP responses.
 3. **Pluggable Channels & Destinations:** Channels implement `ChannelAdapter`; destinations implement `DestinationProvider`. Core and module layers interact solely through these contracts.
@@ -46,7 +47,9 @@ Data is stored in Supabase PostgreSQL with strict multi-tenancy enforced at the 
 ```
 
 ### Queue Engine: Postgres `FOR UPDATE SKIP LOCKED`
+
 Instead of adding Redis and an always-on BullMQ worker, runs are claimed directly from PostgreSQL:
+
 ```sql
 CREATE OR REPLACE FUNCTION claim_pending_runs(batch_size int, max_age_seconds int)
 RETURNS SETOF automation_runs LANGUAGE sql AS $$
@@ -64,6 +67,7 @@ RETURNS SETOF automation_runs LANGUAGE sql AS $$
   RETURNING *;
 $$;
 ```
+
 This guarantees atomic, non-blocking queue processing across concurrent serverless instances at zero extra cost.
 
 ---
@@ -146,13 +150,18 @@ An automation run adheres to a deterministic, non-reversible finite state machin
 ## 5. Adapter Interfaces
 
 ### Channel Adapter (`src/channels/types.ts`)
+
 ```ts
 export interface ChannelAdapter {
   readonly id: string;
   verifyAndParse(req: Request): Promise<unknown>;
   normalize(payload: unknown): InboundEvent[];
   send(account: AccountCredentials, event: InboundEvent, text: string): Promise<SendResult>;
-  replyPublicly?(account: AccountCredentials, event: InboundEvent, text: string): Promise<SendResult>;
+  replyPublicly?(
+    account: AccountCredentials,
+    event: InboundEvent,
+    text: string,
+  ): Promise<SendResult>;
   connectUrl(state: string): string;
   completeConnect(code: string): Promise<ConnectedAccount>;
   refreshCredentials(account: AccountCredentials): Promise<RefreshResult>;
@@ -160,6 +169,7 @@ export interface ChannelAdapter {
 ```
 
 ### Destination Provider (`src/destinations/types.ts`)
+
 ```ts
 export interface DestinationProvider {
   readonly id: string;
@@ -176,6 +186,7 @@ Adding a new channel (WhatsApp, Telegram) requires implementing `ChannelAdapter`
 ## 6. Configuration & Branding Model
 
 All business parameters, brand identities, and platform limits reside exclusively in `src/config/business.config.ts`, validated via Zod:
+
 - `brand.name`, `brand.domain`
 - `channels.enabled`
 - `destinations.enabled`
@@ -200,12 +211,12 @@ No brand terms, pricing, or product names exist anywhere in core or module logic
 
 ## 8. Dependency Justification
 
-| Dependency | Purpose | Justification |
-| :--- | :--- | :--- |
-| `next`, `react`, `react-dom` | Web framework & dashboard | Standard modern App Router; provides server actions & `after()` background execution |
-| `zod` | Input validation | Parse, do not trust: enforces schema contracts on webhooks, env, and config |
-| `@supabase/supabase-js` | Database client | Connects to Supabase Postgres with RLS and executes `claim_pending_runs` RPC |
-| `lucide-react`, `tailwindcss` | Minimal creator dashboard | Accessible, lightweight styling and dashboard UI |
-| `vitest` | Unit & integration tests | Native ESM TypeScript test runner with ultra-fast execution |
+| Dependency                    | Purpose                   | Justification                                                                        |
+| :---------------------------- | :------------------------ | :----------------------------------------------------------------------------------- |
+| `next`, `react`, `react-dom`  | Web framework & dashboard | Standard modern App Router; provides server actions & `after()` background execution |
+| `zod`                         | Input validation          | Parse, do not trust: enforces schema contracts on webhooks, env, and config          |
+| `@supabase/supabase-js`       | Database client           | Connects to Supabase Postgres with RLS and executes `claim_pending_runs` RPC         |
+| `lucide-react`, `tailwindcss` | Minimal creator dashboard | Accessible, lightweight styling and dashboard UI                                     |
+| `vitest`                      | Unit & integration tests  | Native ESM TypeScript test runner with ultra-fast execution                          |
 
 Zero Redis. Zero BullMQ. Zero always-on container expenses.

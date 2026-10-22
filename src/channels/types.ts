@@ -53,15 +53,11 @@ export interface ChannelAdapter {
   readonly id: string;
   verifyAndParse(req: Request): Promise<unknown>;
   normalize(payload: unknown): InboundEvent[];
-  send(
-    account: AccountCredentials,
-    event: InboundEvent,
-    text: string
-  ): Promise<SendResult>;
+  send(account: AccountCredentials, event: InboundEvent, text: string): Promise<SendResult>;
   replyPublicly?(
     account: AccountCredentials,
     event: InboundEvent,
-    text: string
+    text: string,
   ): Promise<SendResult>;
   connectUrl(state: string): string;
   completeConnect(code: string): Promise<ConnectedAccount>;

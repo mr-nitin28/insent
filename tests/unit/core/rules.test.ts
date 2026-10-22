@@ -46,9 +46,7 @@ describe("core/rules", () => {
     });
 
     it("allows duplicate keyword if post scopes are mutually disjoint", () => {
-      const existing: AutomationRule[] = [
-        { ...baseRule, id: "rule-1", postScope: "post-1" },
-      ];
+      const existing: AutomationRule[] = [{ ...baseRule, id: "rule-1", postScope: "post-1" }];
       const candidate: AutomationRule = {
         ...baseRule,
         id: "rule-2",
@@ -59,9 +57,7 @@ describe("core/rules", () => {
     });
 
     it("allows different accounts to use the same keyword", () => {
-      const existing: AutomationRule[] = [
-        { ...baseRule, id: "rule-1", accountId: "acc-1" },
-      ];
+      const existing: AutomationRule[] = [{ ...baseRule, id: "rule-1", accountId: "acc-1" }];
       const candidate: AutomationRule = {
         ...baseRule,
         id: "rule-2",
