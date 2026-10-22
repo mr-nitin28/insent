@@ -4,29 +4,29 @@ ANOZIK Social Connect is a modular, high-performance, multi-tenant social automa
 
 ---
 
-## 1. Folder Structure & Strict Architectural Boundaries
+## 1. Folder Structure & Architectural Boundaries
 
 ```
 anozik-social-connect/
 ├── docs/                # Architecture, Meta API Notes, Audit, Runbook, Future, Adapting
 ├── supabase/migrations/ # Forward-only SQL migrations with Row-Level Security
-├── scripts/             # simulate-webhook.ts (E2E simulator), seed.ts
+├── scripts/             # simulate-webhook.ts (E2E simulator), check-dependencies.ts, seed.ts
 ├── src/
 │   ├── config/          # business.config.ts, env.ts (the ONLY place with brand/business logic)
 │   ├── core/            # PURE domain logic: matching, templates, throttle, status machine, errors
 │   ├── channels/        # Channel adapters (types.ts, registry.ts, instagram/)
 │   ├── destinations/    # Destination providers (types.ts, registry.ts, custom-url/, anozik/)
-│   ├── modules/         # Application services: accounts, automations, runs, links, analytics, retention
+│   ├── modules/         # Services: accounts, automations, runs, links, retention
 │   └── app/             # Thin Next.js App Router endpoints and minimal creator dashboard
-└── tests/               # Unit, integration, and simulated E2E test suites
+└── tests/               # Unit, integration, security (RLS), and simulated E2E test suites
 ```
 
 ### Architectural Invariants:
 
-1. **Pure Core:** `src/core/` is completely pure. It performs zero I/O, imports no third-party network libraries or sibling directories, and contains pure business domain logic.
-2. **Thin Web Layer:** `src/app/` contains no business logic. Route handlers validate inputs with Zod, invoke a module service, and return standard JSON or HTTP responses.
-3. **Pluggable Channels & Destinations:** Channels implement `ChannelAdapter`; destinations implement `DestinationProvider`. Core and module layers interact solely through these contracts.
-4. **Boundary Limit:** Files remain under ~250 lines; functions under ~40 lines. Zero circular dependencies.
+1. **Pure Core:** `src/core/` is completely pure (0 external I/O, 0 outer imports).
+2. **Thin Web Layer:** `src/app/` contains no business logic. Handlers parse via Zod and call modules.
+3. **Pluggable Ports:** Channels implement `ChannelAdapter`; destinations implement `DestinationProvider`.
+4. **Boundary Limit:** Files remain under ~200 lines; functions under ~40 lines. Zero circular dependencies.
 
 ---
 
@@ -36,39 +36,19 @@ Data is stored in Supabase PostgreSQL with strict multi-tenancy enforced at the 
 
 ```
 [workspaces] (tenant boundary)
-    │
     ├── [social_accounts] (encrypted tokens, status, hourly caps)
     ├── [automation_rules] (keywords, match mode, message template, post scope)
     ├── [automation_runs]  (status, attempts, next_attempt, UNIQUE: account_id + comment_id)
     ├── [tracked_links]    (slug, destination_url, click_count)
-    │       └── [link_clicks] (timestamp, ip_hash, user_agent, bot_flag)
+    │       ├── [link_clicks] (timestamp, ip_hash, user_agent, bot_flag)
+    │       └── [conversions] (tracked_link_id, event_name, value, currency)
     ├── [daily_counters]  (aggregate runs & sends per account per day)
     └── [app_settings]    (global & workspace kill switches)
 ```
 
 ### Queue Engine: Postgres `FOR UPDATE SKIP LOCKED`
 
-Instead of adding Redis and an always-on BullMQ worker, runs are claimed directly from PostgreSQL:
-
-```sql
-CREATE OR REPLACE FUNCTION claim_pending_runs(batch_size int, max_age_seconds int)
-RETURNS SETOF automation_runs LANGUAGE sql AS $$
-  UPDATE automation_runs
-  SET status = 'sending', claimed_at = now(), updated_at = now()
-  WHERE id IN (
-    SELECT id FROM automation_runs
-    WHERE status = 'pending'
-      AND run_at <= now()
-      AND (created_at >= now() - (max_age_seconds || ' seconds')::interval)
-    ORDER BY run_at ASC
-    FOR UPDATE SKIP LOCKED
-    LIMIT batch_size
-  )
-  RETURNING *;
-$$;
-```
-
-This guarantees atomic, non-blocking queue processing across concurrent serverless instances at zero extra cost.
+Runs are claimed atomically from PostgreSQL via `claim_pending_runs` using `FOR UPDATE SKIP LOCKED`. This guarantees atomic, non-blocking queue processing across concurrent serverless instances at zero extra cost.
 
 ---
 
@@ -76,41 +56,21 @@ This guarantees atomic, non-blocking queue processing across concurrent serverle
 
 ```
 Webhook POST
-  │
-  ├── 1. Signature Verify: HMAC-SHA256(raw_body, INSTAGRAM_APP_SECRET) via timingSafeEqual
+  ├── 1. Signature Verify: HMAC-SHA256(raw_body, secret) via timingSafeEqual
   ├── 2. Inbound Normalize: adapter.normalize(payload) -> InboundEvent[]
-  ├── 3. Filter Ingest:
-  │      - Drop if commenter_id === account_id (own comment loop guard)
-  │      - Drop if parent_id is present (drop comment replies in V1)
-  │      - Check 6.5-day eligibility window
-  ├── 4. Evaluate Rules (in-memory cached per account):
-  │      - Lowest priority number first -> Stricter match mode -> Earliest keyword position
-  │      - If no match: Drop silently, nothing stored
-  ├── 5. Idempotent Insert:
-  │      - INSERT INTO automation_runs (account_id, comment_id, ...) ON CONFLICT DO NOTHING
-  │      - Unique index on (account_id, comment_id) guarantees single run per comment
+  ├── 3. Filter Ingest: Drop own comments and comment replies (loop guards)
+  ├── 4. Evaluate Rules (in-memory cached per account 30s): Priority -> Strictness -> Earliest pos
+  ├── 5. Idempotent Insert: UNIQUE (account_id, comment_id) ON CONFLICT DO NOTHING
   ├── 6. Immediate Response: HTTP 200 returned in <200ms
   └── 7. Worker Kick: Next.js after() triggers background drain + cron every 30s as fallback
-```
 
-```
 Worker Execution:
-  │
-  ├── 1. Reap Stuck Runs: Runs in 'sending' > 5 minutes transition to 'unknown_delivery' (never re-sent)
+  ├── 1. Reap Stuck Runs: Runs in 'sending' > 5m transition to 'unknown_delivery' (never re-sent)
   ├── 2. Claim Batch: claim_pending_runs(batch_size=10) with SKIP LOCKED
-  ├── 3. Check Eligibility:
-  │      - Workspace kill switch active? -> Skip
-  │      - Account connected & token valid? -> If not, pause rule & flag account
-  │      - Hourly throttle cap reached? -> Delay run_at by throttle window
-  ├── 4. Prepare Message:
-  │      - Resolve destination provider URL -> Generate tracked short link
-  │      - Render template ({username}, {link}) -> Append business disclosure
+  ├── 3. Check Eligibility: Kill switch, valid token, 6.5-day window, hourly throttle cap
+  ├── 4. Prepare Message: Resolve destination URL -> generate tracked link -> render template
   ├── 5. Send Private Reply: adapter.send(account, event, renderedText)
-  ├── 6. Classify Result:
-  │      - Success -> mark 'sent'
-  │      - Rate limit / transient 5xx -> backoff retry (attempts < 4)
-  │      - Unconfirmed (timeout, Meta code 1) -> mark 'unknown_delivery'
-  │      - Auth expired (190) -> mark account 'needs_reauth', run 'failed'
+  ├── 6. Classify Result: sent | retry (backoff) | unknown_delivery | needs_reauth (pause rules)
   └── 7. Optional Public Reply: adapter.replyPublicly(...) (failure never alters DM status)
 ```
 
@@ -118,105 +78,44 @@ Worker Execution:
 
 ## 4. State Machine Specification
 
-An automation run adheres to a deterministic, non-reversible finite state machine:
+Automation runs adhere to a deterministic finite state machine:
+`pending` -> `sending` -> `sent` | `skipped` | `failed` | `unknown_delivery`.
 
-```
-                  ┌──────────────┐
-                  │   PENDING    │◀────────┐ (retry with backoff, max 4)
-                  └──────┬───────┘         │
-                         │ claim           │
-                         ▼                 │
-                  ┌──────────────┐         │
-                  │   SENDING    ├─────────┘
-                  └──┬───┬───┬───┘
-         success     │   │   │ crash / timeout
-       ┌─────────────┘   │   └─────────────┐
-       ▼                 ▼                 ▼
- ┌───────────┐     ┌───────────┐ ┌───────────────────┐
- │   SENT    │     │  SKIPPED  │ │ UNKNOWN_DELIVERY  │ (terminal: no auto-retry)
- └───────────┘     └───────────┘ └───────────────────┘
-                         │
-                         ▼
-                   ┌───────────┐
-                   │  FAILED   │ (permanent error or exhausted attempts)
-                   └───────────┘
-```
-
-- **Transitions:** Illegal transitions (e.g. `sent` -> `pending`) throw `InvalidStateTransitionError`.
-- **Unknown Delivery:** Worker crashes, gateway timeouts, or Meta generic code 1 map directly to `unknown_delivery`. This prevents destructive duplicate DM spam loops.
+- Illegal transitions (e.g. `sent` -> `pending`) throw `InvalidStateTransitionError`.
+- Worker crashes, gateway timeouts, or Meta generic code 1 map directly to `unknown_delivery` (never auto-resent).
 
 ---
 
 ## 5. Adapter Interfaces
 
-### Channel Adapter (`src/channels/types.ts`)
-
-```ts
-export interface ChannelAdapter {
-  readonly id: string;
-  verifyAndParse(req: Request): Promise<unknown>;
-  normalize(payload: unknown): InboundEvent[];
-  send(account: AccountCredentials, event: InboundEvent, text: string): Promise<SendResult>;
-  replyPublicly?(
-    account: AccountCredentials,
-    event: InboundEvent,
-    text: string,
-  ): Promise<SendResult>;
-  connectUrl(state: string): string;
-  completeConnect(code: string): Promise<ConnectedAccount>;
-  refreshCredentials(account: AccountCredentials): Promise<RefreshResult>;
-}
-```
-
-### Destination Provider (`src/destinations/types.ts`)
-
-```ts
-export interface DestinationProvider {
-  readonly id: string;
-  readonly label: string;
-  list(workspaceId: string): Promise<DestinationOption[]>;
-  resolve(ref: DestinationRef): Promise<{ url: string }>;
-}
-```
-
-Adding a new channel (WhatsApp, Telegram) requires implementing `ChannelAdapter` in `src/channels/<name>/` and registering it in `registry.ts`. Adding a business integration (Shopify, Calendly) requires implementing `DestinationProvider` in `src/destinations/<name>/`.
+Channels implement `ChannelAdapter` (`verifyAndParse`, `normalize`, `send`, `replyPublicly`, `connectUrl`, `completeConnect`, `refreshCredentials`). Destinations implement `DestinationProvider` (`list`, `resolve`). Adding a channel or destination requires adding one folder and one registry line.
 
 ---
 
 ## 6. Configuration & Branding Model
 
-All business parameters, brand identities, and platform limits reside exclusively in `src/config/business.config.ts`, validated via Zod:
-
-- `brand.name`, `brand.domain`
-- `channels.enabled`
-- `destinations.enabled`
-- `limits.hourlyCapPerAccount` (default 600)
-- `limits.maxRetries` (4)
-- `limits.retentionDays` (30)
-- `defaults.disclosureText` ("Automated response via {brand}")
-
-No brand terms, pricing, or product names exist anywhere in core or module logic.
+All business parameters reside exclusively in `src/config/business.config.ts`, validated via Zod (`brand`, `channels`, `destinations`, `limits`, `templates`). Zero brand terms exist in core or modules.
 
 ---
 
 ## 7. Security & Compliance Architecture
 
-1. **Token Protection:** Tokens encrypted via AES-256-GCM using `TOKEN_ENCRYPTION_KEY` before persistence; decrypted in memory only during active dispatch. Tokens are never exposed in browser payloads or API responses.
-2. **Signature Verification:** Raw body string HMAC-SHA256 verified with `crypto.timingSafeEqual` against `X-Hub-Signature-256`.
-3. **Data Retention & Privacy:** Automated cleanup routine scrubs commenter usernames, IDs, and comment text after `limits.retentionDays`.
-4. **Link Tracking & Bot Filtering:** Tracked links detect and discard social preview crawlers (e.g. WhatsApp, FacebookExternalHit, Twitterbot, LinkedInBot) before recording clicks.
-5. **URL Allowlist:** Destination URLs require valid HTTPS protocols and reject public URL shorteners (bit.ly, tinyurl).
+1. **Token Protection:** AES-256-GCM encrypted tokens at rest. Never exposed to browser.
+2. **Signature Verification:** Raw body HMAC-SHA256 with `crypto.timingSafeEqual`.
+3. **Data Retention:** Automated GDPR cleanup scrubs usernames, IDs, and comment text.
+4. **Bot Filtering:** Social preview crawlers filtered before incrementing link click counts.
+5. **URL Allowlist:** Destination URLs require HTTPS and reject public shorteners.
 
 ---
 
 ## 8. Dependency Justification
 
-| Dependency                    | Purpose                   | Justification                                                                        |
-| :---------------------------- | :------------------------ | :----------------------------------------------------------------------------------- |
-| `next`, `react`, `react-dom`  | Web framework & dashboard | Standard modern App Router; provides server actions & `after()` background execution |
-| `zod`                         | Input validation          | Parse, do not trust: enforces schema contracts on webhooks, env, and config          |
-| `@supabase/supabase-js`       | Database client           | Connects to Supabase Postgres with RLS and executes `claim_pending_runs` RPC         |
-| `lucide-react`, `tailwindcss` | Minimal creator dashboard | Accessible, lightweight styling and dashboard UI                                     |
-| `vitest`                      | Unit & integration tests  | Native ESM TypeScript test runner with ultra-fast execution                          |
+| Dependency                    | Purpose             | Justification                                                   |
+| :---------------------------- | :------------------ | :-------------------------------------------------------------- |
+| `next`, `react`, `react-dom`  | Web & API framework | Standard App Router; provides server actions & `after()` kick   |
+| `zod`                         | Input validation    | Parse, do not trust: strict validation of webhooks, env, config |
+| `@supabase/supabase-js`       | Database client     | Connects to Postgres with RLS and executes `claim_pending_runs` |
+| `lucide-react`, `tailwindcss` | Minimal dashboard   | Accessible, lightweight styling and dashboard UI                |
+| `vitest`                      | Test runner         | Native ESM TypeScript test runner with ultra-fast execution     |
 
 Zero Redis. Zero BullMQ. Zero always-on container expenses.
