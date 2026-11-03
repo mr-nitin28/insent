@@ -20,6 +20,38 @@ export interface SocialAccountRecord {
 }
 
 export const accountsService = {
+  async findById(id: string): Promise<AccountCredentials | null> {
+    const { data, error } = await supabaseAdmin
+      .from("social_accounts")
+      .select(
+        "id, workspace_id, platform, account_id, username, encrypted_access_token, token_iv, token_auth_tag, status, hourly_cap",
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to query social account: ${error.message}`);
+    }
+
+    if (!data) return null;
+
+    const record = data as SocialAccountRecord;
+    const decryptedAccessToken = decryptToken({
+      encryptedData: record.encrypted_access_token,
+      iv: record.token_iv,
+      authTag: record.token_auth_tag,
+    });
+
+    return {
+      id: record.id,
+      workspaceId: record.workspace_id,
+      platform: record.platform,
+      accountId: record.account_id,
+      username: record.username,
+      decryptedAccessToken,
+    };
+  },
+
   async findByPlatformId(
     platform: string,
     platformAccountId: string,

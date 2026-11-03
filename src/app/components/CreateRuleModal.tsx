@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { X, Zap } from "lucide-react";
-import type { DashboardAccount } from "./types";
+import type { DashboardAccount, ScopeType, MediaSnapshotItem } from "./types";
 import { RulePreview } from "./RulePreview";
 import { KeywordsInput } from "./KeywordsInput";
+import { MediaPickerGrid } from "./MediaPickerGrid";
 
 interface CreateRuleModalProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export function CreateRuleModal({
   const [priority, setPriority] = useState("1");
   const [matchMode, setMatchMode] = useState<"exact" | "whole_word" | "contains">("whole_word");
   const [keywords, setKeywords] = useState<string[]>(["guide", "link"]);
+  const [scopeType, setScopeType] = useState<ScopeType>("specific");
+  const [selectedMedia, setSelectedMedia] = useState<MediaSnapshotItem[]>([]);
   const [destinationRef, setDestinationRef] = useState("https://yourlink.com/offer");
   const [messageTemplate, setMessageTemplate] = useState(
     "Hey @{username}! Here is your link: {link}",
@@ -37,10 +40,19 @@ export function CreateRuleModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const selectedAcc = accountId || accounts[0]?.id;
+    const selectedAcc =
+      accountId && accounts.some((a) => a.id === accountId) ? accountId : accounts[0]?.id;
     if (!selectedAcc) return setError("Please connect an account first");
     if (keywords.length === 0) return setError("Please add at least one trigger keyword");
 
+    if (scopeType === "specific" && selectedMedia.length === 0) {
+      return setError("Please select at least one post/reel, or switch target scope.");
+    }
+    if (scopeType === "story" && selectedMedia.length === 0) {
+      return setError("Please select at least one active story, or switch target scope.");
+    }
+
+    const finalName = name.trim() || `Auto DM (${keywords.slice(0, 2).join(", ")})`;
     setLoading(true);
     try {
       const res = await fetch("/api/automations", {
@@ -48,10 +60,13 @@ export function CreateRuleModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accountId: selectedAcc,
-          name: name.trim(),
+          name: finalName,
           priority: Number(priority) || 1,
           matchMode,
           keywords,
+          scopeType,
+          targetMediaIds: selectedMedia.map((m) => m.id),
+          targetMediaSnapshot: selectedMedia,
           destinationRef: destinationRef.trim(),
           messageTemplate: messageTemplate.trim(),
           publicReplyTemplate: publicReply.trim() || null,
@@ -70,9 +85,12 @@ export function CreateRuleModal({
     }
   }
 
+  const currentAccountId =
+    (accountId && accounts.some((a) => a.id === accountId) ? accountId : accounts[0]?.id) || "";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-3 sm:p-4 backdrop-blur-xs">
-      <div className="w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-6 shadow-[0_20px_50px_rgba(15,23,42,0.18)]">
+      <div className="w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-4 sm:p-6 shadow-[0_20px_50px_rgba(15,23,42,0.18)]">
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-emerald-600" />
@@ -100,8 +118,11 @@ export function CreateRuleModal({
                 Target Account
               </label>
               <select
-                value={accountId || accounts[0]?.id || ""}
-                onChange={(e) => setAccountId(e.target.value)}
+                value={currentAccountId}
+                onChange={(e) => {
+                  setAccountId(e.target.value);
+                  setSelectedMedia([]); // Reset selected media for different account
+                }}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
               >
                 {accounts.map((acc) => (
@@ -123,6 +144,15 @@ export function CreateRuleModal({
               />
             </div>
           </div>
+
+          {/* Interactive Media Target Picker */}
+          <MediaPickerGrid
+            accountId={currentAccountId}
+            scopeType={scopeType}
+            selectedMedia={selectedMedia}
+            onChangeScopeType={setScopeType}
+            onChangeSelectedMedia={setSelectedMedia}
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <div>

@@ -1,38 +1,38 @@
 /**
  * Dedicated typed HTTP client for Meta Graph API calls.
  * All Meta interactions are funneled through this module with version pinning.
+ * Supports both Instagram API (graph.instagram.com) and Meta Business API (graph.facebook.com).
  */
 
 import { env } from "@/config/env";
+import {
+  MetaApiError,
+  type RawMetaErrorPayload,
+  type MetaProfileResponse,
+  type MetaSendResponse,
+  type MetaTokenResponse,
+  type MetaCommentItem,
+  type MetaMediaItem,
+  type MetaMediaResponse,
+} from "./types";
 
-export class MetaApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly code?: number,
-    public readonly subcode?: number,
-    public readonly errorType?: string,
-    public readonly fbTraceId?: string,
-  ) {
-    super(message);
-    this.name = "MetaApiError";
-  }
-}
+export {
+  MetaApiError,
+  type MetaProfileResponse,
+  type MetaSendResponse,
+  type MetaTokenResponse,
+  type MetaCommentItem,
+  type MetaMediaItem,
+  type MetaMediaResponse,
+};
 
-interface RawMetaErrorPayload {
-  error?: {
-    message?: string;
-    type?: string;
-    code?: number;
-    error_subcode?: number;
-    fbtrace_id?: string;
-  };
-}
-
-function getGraphUrl(endpoint: string): string {
+function getGraphUrl(endpoint: string, token?: string): string {
   const version = env.META_GRAPH_API_VERSION;
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
-  return `https://graph.instagram.com/${version}${cleanEndpoint}`;
+  // Meta System User / Facebook tokens start with EAA; Instagram User tokens start with IG
+  const host =
+    token && token.startsWith("EAA") ? "https://graph.facebook.com" : "https://graph.instagram.com";
+  return `${host}/${version}${cleanEndpoint}`;
 }
 
 async function handleMetaResponse<T>(res: Response, callContext: string): Promise<T> {
@@ -71,33 +71,6 @@ async function handleMetaResponse<T>(res: Response, callContext: string): Promis
   return json as T;
 }
 
-export interface MetaProfileResponse {
-  readonly id: string;
-  readonly username: string;
-  readonly name?: string;
-  readonly profile_picture_url?: string;
-}
-
-export interface MetaSendResponse {
-  readonly recipient_id?: string;
-  readonly message_id?: string;
-}
-
-export interface MetaTokenResponse {
-  readonly access_token: string;
-  readonly token_type?: string;
-  readonly expires_in?: number;
-  readonly user_id?: string;
-}
-
-export interface MetaCommentItem {
-  readonly id: string;
-  readonly text: string;
-  readonly timestamp: string;
-  readonly from?: { readonly id: string; readonly username: string };
-  readonly parent_id?: string;
-}
-
 export const metaClient = {
   buildAuthorizeUrl(state: string): string {
     const params = new URLSearchParams({
@@ -132,7 +105,7 @@ export const metaClient = {
       client_secret: env.INSTAGRAM_APP_SECRET,
       access_token: shortToken,
     });
-    const res = await fetch(`${getGraphUrl("/access_token")}?${params.toString()}`);
+    const res = await fetch(`${getGraphUrl("/access_token", shortToken)}?${params.toString()}`);
     return handleMetaResponse<MetaTokenResponse>(res, "exchangeShortForLongToken");
   },
 
@@ -141,16 +114,47 @@ export const metaClient = {
       grant_type: "ig_refresh_token",
       access_token: longToken,
     });
-    const res = await fetch(`${getGraphUrl("/refresh_access_token")}?${params.toString()}`);
+    const res = await fetch(
+      `${getGraphUrl("/refresh_access_token", longToken)}?${params.toString()}`,
+    );
     return handleMetaResponse<MetaTokenResponse>(res, "refreshLongToken");
   },
 
   async getMe(accessToken: string): Promise<MetaProfileResponse> {
+    // If Facebook Graph API token (EAA...)
+    if (accessToken.startsWith("EAA")) {
+      try {
+        const pagesRes = await fetch(
+          `${getGraphUrl("/me/accounts", accessToken)}?fields=id,name,instagram_business_account{id,username,name,profile_picture_url}&access_token=${accessToken}`,
+        );
+        const pagesJson = (await pagesRes.json()) as {
+          data?: Array<{
+            instagram_business_account?: {
+              id: string;
+              username: string;
+              name?: string;
+              profile_picture_url?: string;
+            };
+          }>;
+        };
+        const pageWithIg = pagesJson.data?.find((p) => p.instagram_business_account?.id);
+        if (pageWithIg?.instagram_business_account) {
+          const ig = pageWithIg.instagram_business_account;
+          return {
+            id: ig.id,
+            username: ig.username,
+            name: ig.name,
+            profile_picture_url: ig.profile_picture_url,
+          };
+        }
+      } catch {}
+    }
+
     const params = new URLSearchParams({
       fields: "id,username,name,profile_picture_url",
       access_token: accessToken,
     });
-    const res = await fetch(`${getGraphUrl("/me")}?${params.toString()}`);
+    const res = await fetch(`${getGraphUrl("/me", accessToken)}?${params.toString()}`);
     return handleMetaResponse<MetaProfileResponse>(res, "getMe");
   },
 
@@ -159,7 +163,7 @@ export const metaClient = {
       subscribed_fields: "comments,messages",
       access_token: token,
     });
-    const res = await fetch(getGraphUrl(`/${igUserId}/subscribed_apps`), {
+    const res = await fetch(getGraphUrl(`/${igUserId}/subscribed_apps`, token), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -173,7 +177,7 @@ export const metaClient = {
     text: string,
     accessToken: string,
   ): Promise<MetaSendResponse> {
-    const res = await fetch(getGraphUrl(`/${igUserId}/messages`), {
+    const res = await fetch(getGraphUrl(`/${igUserId}/messages`, accessToken), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text } }),
@@ -187,7 +191,7 @@ export const metaClient = {
     accessToken: string,
   ): Promise<{ id: string }> {
     const form = new URLSearchParams({ message, access_token: accessToken });
-    const res = await fetch(getGraphUrl(`/${commentId}/replies`), {
+    const res = await fetch(getGraphUrl(`/${commentId}/replies`, accessToken), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -200,7 +204,35 @@ export const metaClient = {
       fields: "id,text,timestamp,from,parent_id",
       access_token: token,
     });
-    const res = await fetch(`${getGraphUrl(`/${mediaId}/comments`)}?${params.toString()}`);
+    const res = await fetch(`${getGraphUrl(`/${mediaId}/comments`, token)}?${params.toString()}`);
     return handleMetaResponse<{ data: MetaCommentItem[] }>(res, "fetchMediaComments");
+  },
+
+  async fetchUserMedia(
+    igUserId: string,
+    token: string,
+    limit = 24,
+    after?: string,
+  ): Promise<MetaMediaResponse> {
+    const params = new URLSearchParams({
+      fields:
+        "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count",
+      access_token: token,
+      limit: String(limit),
+    });
+    if (after) {
+      params.set("after", after);
+    }
+    const res = await fetch(`${getGraphUrl(`/${igUserId}/media`, token)}?${params.toString()}`);
+    return handleMetaResponse<MetaMediaResponse>(res, "fetchUserMedia");
+  },
+
+  async fetchUserStories(igUserId: string, token: string): Promise<MetaMediaResponse> {
+    const params = new URLSearchParams({
+      fields: "id,caption,media_type,media_url,permalink,timestamp",
+      access_token: token,
+    });
+    const res = await fetch(`${getGraphUrl(`/${igUserId}/stories`, token)}?${params.toString()}`);
+    return handleMetaResponse<MetaMediaResponse>(res, "fetchUserStories");
   },
 };

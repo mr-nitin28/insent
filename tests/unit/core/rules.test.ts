@@ -17,6 +17,8 @@ describe("core/rules", () => {
     matchMode: "contains",
     keywords: ["link"],
     postScope: null,
+    scopeType: "all",
+    targetMediaIds: [],
     destinationRef: "dest-1",
     messageTemplate: "Here is your link",
     status: "active",
@@ -24,12 +26,35 @@ describe("core/rules", () => {
   };
 
   describe("scope overlap checks", () => {
-    it("detects scope overlap correctly", () => {
+    it("detects scope overlap correctly with legacy string scopes", () => {
       expect(doScopesOverlap(null, null)).toBe(true);
       expect(doScopesOverlap(null, "post-123")).toBe(true);
       expect(doScopesOverlap("post-123", null)).toBe(true);
       expect(doScopesOverlap("post-123", "post-123")).toBe(true);
       expect(doScopesOverlap("post-123", "post-456")).toBe(false);
+    });
+
+    it("detects scope overlap with targetMediaIds", () => {
+      expect(
+        doScopesOverlap(
+          { scopeType: "specific", targetMediaIds: ["post-1", "post-2"] },
+          { scopeType: "specific", targetMediaIds: ["post-2", "post-3"] },
+        ),
+      ).toBe(true);
+
+      expect(
+        doScopesOverlap(
+          { scopeType: "specific", targetMediaIds: ["post-1", "post-2"] },
+          { scopeType: "specific", targetMediaIds: ["post-3", "post-4"] },
+        ),
+      ).toBe(false);
+
+      expect(
+        doScopesOverlap(
+          { scopeType: "all" },
+          { scopeType: "specific", targetMediaIds: ["post-1"] },
+        ),
+      ).toBe(true);
     });
   });
 
@@ -56,6 +81,44 @@ describe("core/rules", () => {
       expect(() => validateRuleOverlap(candidate, existing)).not.toThrow();
     });
 
+    it("allows duplicate keyword if targetMediaIds are mutually disjoint", () => {
+      const existing: AutomationRule[] = [
+        {
+          ...baseRule,
+          id: "rule-1",
+          scopeType: "specific",
+          targetMediaIds: ["reel-101", "reel-102"],
+        },
+      ];
+      const candidate: AutomationRule = {
+        ...baseRule,
+        id: "rule-2",
+        scopeType: "specific",
+        targetMediaIds: ["reel-201"],
+      };
+
+      expect(() => validateRuleOverlap(candidate, existing)).not.toThrow();
+    });
+
+    it("rejects duplicate keyword if targetMediaIds intersect", () => {
+      const existing: AutomationRule[] = [
+        {
+          ...baseRule,
+          id: "rule-1",
+          scopeType: "specific",
+          targetMediaIds: ["reel-101", "reel-102"],
+        },
+      ];
+      const candidate: AutomationRule = {
+        ...baseRule,
+        id: "rule-2",
+        scopeType: "specific",
+        targetMediaIds: ["reel-102", "reel-201"],
+      };
+
+      expect(() => validateRuleOverlap(candidate, existing)).toThrow(RuleOverlapError);
+    });
+
     it("allows different accounts to use the same keyword", () => {
       const existing: AutomationRule[] = [{ ...baseRule, id: "rule-1", accountId: "acc-1" }];
       const candidate: AutomationRule = {
@@ -69,7 +132,49 @@ describe("core/rules", () => {
   });
 
   describe("rule selection precedence", () => {
-    it("chooses rule with lowest priority number first", () => {
+    it("prioritizes specific post rule over global rule regardless of priority number", () => {
+      const globalRule: AutomationRule = {
+        ...baseRule,
+        id: "global-rule",
+        scopeType: "all",
+        postScope: null,
+        priority: 1, // Higher global priority
+        keywords: ["guide"],
+      };
+
+      const specificRule: AutomationRule = {
+        ...baseRule,
+        id: "specific-rule",
+        scopeType: "specific",
+        targetMediaIds: ["reel-42"],
+        priority: 10, // Lower priority number
+        keywords: ["guide"],
+      };
+
+      // A comment arrives on reel-42
+      const result = chooseRule("send guide please", "reel-42", [globalRule, specificRule]);
+      expect(result).not.toBeNull();
+      expect(result?.rule.id).toBe("specific-rule");
+    });
+
+    it("matches rule when postId is inside targetMediaIds array", () => {
+      const multiPostRule: AutomationRule = {
+        ...baseRule,
+        id: "multi-post-rule",
+        scopeType: "specific",
+        targetMediaIds: ["post-a", "post-b", "post-c"],
+        keywords: ["info"],
+      };
+
+      const result = chooseRule("need info", "post-b", [multiPostRule]);
+      expect(result).not.toBeNull();
+      expect(result?.rule.id).toBe("multi-post-rule");
+
+      const noMatch = chooseRule("need info", "post-d", [multiPostRule]);
+      expect(noMatch).toBeNull();
+    });
+
+    it("chooses rule with lowest priority number first when scope specificity is identical", () => {
       const highPriRule: AutomationRule = {
         ...baseRule,
         id: "high-pri",

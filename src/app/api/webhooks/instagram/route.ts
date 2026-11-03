@@ -13,6 +13,7 @@ import { automationsService } from "@/modules/automations/automations.service";
 import { runsService } from "@/modules/runs/runs.service";
 import { chooseRule } from "@/core/rules";
 import { workerPipeline } from "@/modules/worker/worker-pipeline";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -88,6 +89,23 @@ export async function POST(req: Request) {
 
       if (inserted) {
         enqueuedCount++;
+
+        // Auto-latch next_post rule to this post ID
+        if (
+          match.rule.scopeType === "next_post" &&
+          (!match.rule.targetMediaIds || match.rule.targetMediaIds.length === 0)
+        ) {
+          void supabaseAdmin
+            .from("automation_rules")
+            .update({
+              target_media_ids: [event.postId],
+              post_scope: event.postId,
+              scope_type: "specific",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", match.rule.id)
+            .then(() => automationsService.clearAccountCache(account.id));
+        }
       }
     }
   } catch (error: unknown) {

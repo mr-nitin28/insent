@@ -5,6 +5,18 @@
 import { matchKeyword, normalizeText, type MatchMode } from "./matching";
 import { RuleOverlapError } from "./errors";
 
+export type ScopeType = "specific" | "all" | "next_post" | "story";
+
+export interface MediaSnapshotItem {
+  readonly id: string;
+  readonly caption?: string;
+  readonly permalink?: string;
+  readonly mediaUrl?: string;
+  readonly thumbnailUrl?: string;
+  readonly mediaProductType?: "FEED" | "REELS" | "STORY";
+  readonly timestamp?: string;
+}
+
 export interface AutomationRule {
   readonly id: string;
   readonly workspaceId: string;
@@ -13,12 +25,16 @@ export interface AutomationRule {
   readonly priority: number;
   readonly matchMode: MatchMode;
   readonly keywords: readonly string[];
-  readonly postScope: string | null; // null represents all posts
+  readonly scopeType?: ScopeType;
+  readonly targetMediaIds?: readonly string[];
+  readonly targetMediaSnapshot?: readonly MediaSnapshotItem[];
+  readonly postScope: string | null; // null represents all posts (maintained for backward-compatibility)
   readonly destinationRef: string;
   readonly messageTemplate: string;
   readonly publicReplyTemplate?: string | null;
   readonly status: "active" | "paused";
   readonly version: number;
+  readonly createdAt?: string;
 }
 
 export interface MatchedRuleResult {
@@ -33,13 +49,57 @@ const MATCH_MODE_STRICTNESS: Record<MatchMode, number> = {
   contains: 3,
 };
 
+type ScopeInput =
+  | string
+  | null
+  | {
+      readonly scopeType?: ScopeType;
+      readonly targetMediaIds?: readonly string[];
+      readonly postScope?: string | null;
+    };
+
+function extractScope(input: ScopeInput): { type: ScopeType; ids: string[] } {
+  if (typeof input !== "object" || input === null) {
+    return {
+      type: input === null ? "all" : "specific",
+      ids: input ? [input] : [],
+    };
+  }
+
+  const specificIds: string[] = [];
+  if (input.targetMediaIds && input.targetMediaIds.length > 0) {
+    specificIds.push(...input.targetMediaIds);
+  } else if (input.postScope) {
+    specificIds.push(input.postScope);
+  }
+
+  const hasSpecificIds = specificIds.length > 0;
+  let type: ScopeType = input.scopeType ?? (hasSpecificIds ? "specific" : "all");
+
+  if (hasSpecificIds && (!input.scopeType || input.scopeType === "all")) {
+    type = "specific";
+  }
+
+  return { type, ids: specificIds };
+}
+
 /**
  * Checks whether two post scopes overlap.
- * A null scope covers all posts, thus overlapping with any specific post or null.
+ * Backward compatible with raw string | null parameters.
  */
-export function doScopesOverlap(scopeA: string | null, scopeB: string | null): boolean {
-  if (scopeA === null || scopeB === null) return true;
-  return scopeA === scopeB;
+export function doScopesOverlap(scopeA: ScopeInput, scopeB: ScopeInput): boolean {
+  const normA = extractScope(scopeA);
+  const normB = extractScope(scopeB);
+
+  // If either scope is global 'all', they overlap with any specific post or global
+  if (normA.type === "all" || normB.type === "all") return true;
+
+  // If different scope types (e.g. story vs specific post), they do not overlap
+  if (normA.type !== normB.type) return false;
+
+  // If both are specific, they overlap only if target media IDs intersect
+  if (normA.ids.length === 0 || normB.ids.length === 0) return true;
+  return normA.ids.some((id) => normB.ids.includes(id));
 }
 
 /**
@@ -53,13 +113,16 @@ export function validateRuleOverlap(
   for (const existing of existingRules) {
     if (existing.id === candidate.id) continue;
     if (existing.accountId !== candidate.accountId) continue;
-    if (!doScopesOverlap(candidate.postScope, existing.postScope)) continue;
+    if (!doScopesOverlap(candidate, existing)) continue;
 
     for (const candKw of candidate.keywords) {
       const normCand = normalizeText(candKw);
       for (const existKw of existing.keywords) {
         if (normCand === normalizeText(existKw)) {
-          throw new RuleOverlapError(candKw, candidate.postScope);
+          throw new RuleOverlapError(
+            candKw,
+            candidate.postScope ?? candidate.targetMediaIds?.[0] ?? null,
+          );
         }
       }
     }
@@ -67,7 +130,24 @@ export function validateRuleOverlap(
 }
 
 /**
+ * Determines whether a rule applies to a specific postId.
+ */
+export function isRuleApplicableToPost(rule: AutomationRule, postId: string): boolean {
+  if (rule.status !== "active") return false;
+
+  const { type, ids } = extractScope(rule);
+
+  if (type === "all") return true;
+  if (type === "next_post") return true; // Matches candidate next post
+  if (type === "specific" || type === "story") {
+    return ids.length === 0 ? true : ids.includes(postId);
+  }
+  return false;
+}
+
+/**
  * Selects exactly one winning rule for a comment:
+ * 0. Specific post rule beats global/all rule
  * 1. Lowest priority number first
  * 2. Stricter match mode first (exact > whole_word > contains)
  * 3. Earliest keyword position in the comment text
@@ -77,9 +157,7 @@ export function chooseRule(
   postId: string,
   rules: readonly AutomationRule[],
 ): MatchedRuleResult | null {
-  const applicableRules = rules.filter(
-    (r) => r.status === "active" && (r.postScope === null || r.postScope === postId),
-  );
+  const applicableRules = rules.filter((r) => isRuleApplicableToPost(r, postId));
 
   const candidates: MatchedRuleResult[] = [];
 
@@ -101,6 +179,16 @@ export function chooseRule(
   }
 
   candidates.sort((a, b) => {
+    // 0. Specific post scope beats global wildcard scope
+    const normA = extractScope(a.rule);
+    const normB = extractScope(b.rule);
+    const isSpecificA = normA.type === "specific" && normA.ids.includes(postId);
+    const isSpecificB = normB.type === "specific" && normB.ids.includes(postId);
+
+    if (isSpecificA !== isSpecificB) {
+      return isSpecificA ? -1 : 1; // Specific post rule strictly wins over global rule
+    }
+
     // 1. Lowest priority number first
     if (a.rule.priority !== b.rule.priority) {
       return a.rule.priority - b.rule.priority;

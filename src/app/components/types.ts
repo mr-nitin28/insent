@@ -23,12 +23,27 @@ export interface DashboardAccount {
   created_at: string;
 }
 
+export type ScopeType = "specific" | "all" | "next_post" | "story";
+
+export interface MediaSnapshotItem {
+  id: string;
+  caption?: string;
+  permalink?: string;
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  mediaProductType?: "FEED" | "REELS" | "STORY";
+  timestamp?: string;
+}
+
 export interface DashboardRule {
   id: string;
   name: string;
   priority: number;
   match_mode: "exact" | "whole_word" | "contains";
   keywords: string[];
+  scope_type?: ScopeType;
+  target_media_ids?: string[];
+  target_media_snapshot?: MediaSnapshotItem[];
   post_scope: string | null;
   destination_ref: string;
   message_template: string;
