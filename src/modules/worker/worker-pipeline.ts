@@ -173,7 +173,13 @@ export const workerPipeline = {
         messageId: result.messageId,
       });
       if (businessConfig.features.enablePublicReplies && adapter.replyPublicly) {
-        const replyText = rule.public_reply_template || businessConfig.templates.defaultPublicReply;
+        const rawReply = rule.public_reply_template || businessConfig.templates.defaultPublicReply;
+        const replyText = renderTemplate(rawReply, {
+          username: run.commenter_username ?? "",
+          link: trackedUrl,
+          post_id: run.post_id,
+          account_username: credentials.username,
+        });
         adapter.replyPublicly(credentials, event, replyText).catch(() => {});
       }
       return "sent";
@@ -202,7 +208,10 @@ export const workerPipeline = {
         });
         return "skipped";
       }
-      if (result.requiresReauth) {
+      if (result.isRestricted) {
+        await accountsService.updateAccountStatus(credentials.id, "restricted");
+        await automationsService.pauseRulesForAccount(credentials.id);
+      } else if (result.requiresReauth) {
         await accountsService.updateAccountStatus(credentials.id, "needs_reauth");
         await automationsService.pauseRulesForAccount(credentials.id);
       }

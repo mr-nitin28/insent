@@ -83,10 +83,24 @@ export class InstagramChannelAdapter implements ChannelAdapter {
             reason: "Instagram access token expired or revoked (Meta 190)",
           };
         }
-        if (err.code === 368 || err.code === 4 || err.code === 17) {
+        if (
+          err.code === 368 ||
+          err.message.toLowerCase().includes("deemed abusive") ||
+          err.message.toLowerCase().includes("going too fast") ||
+          err.message.toLowerCase().includes("blocked from using it")
+        ) {
+          return {
+            type: "failed",
+            permanent: true,
+            isRestricted: true,
+            reason:
+              "Instagram policy restriction or velocity block encountered (Meta 368). All sends halted immediately to protect your account.",
+          };
+        }
+        if (err.code === 4 || err.code === 17) {
           return {
             type: "retry",
-            delaySeconds: 180,
+            delaySeconds: 300,
             reason: `Meta rate limit encountered (Code ${err.code})`,
           };
         }

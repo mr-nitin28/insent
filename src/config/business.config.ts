@@ -62,14 +62,16 @@ export const defaultBusinessConfig: BusinessConfig = businessConfigSchema.parse(
     defaultProvider: "anozik",
   },
   templates: {
-    defaultCommentDm: "Hey @{username}, here is the link you requested: {link}",
-    defaultPublicReply: "Sent to your DMs! Check your message requests if you don't follow us. ✨",
+    defaultCommentDm:
+      "{Hey|Hi|Hello} @{username}, {here is the link you requested|here's your requested link|check out the link here}: {link}",
+    defaultPublicReply:
+      "{Sent to your DMs! Check message requests ✨|Just sent you a DM with the link! 🚀|Check your direct messages! 😊|Sent! Look in your message requests 📩}",
     disclosureText: "Automated response via Anozik Social Connect.",
   },
   limits: {
-    hourlyCapPerAccount: 600,
-    dailyCapPerRule: 5000,
-    maxSendAttempts: 4,
+    hourlyCapPerAccount: 50,
+    dailyCapPerRule: 1000,
+    maxSendAttempts: 3,
     retentionDays: 30,
     maxMessageLength: 1000,
     maxCommentAgeSeconds: 561600, // 6.5 days in seconds

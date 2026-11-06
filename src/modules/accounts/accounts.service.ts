@@ -15,7 +15,7 @@ export interface SocialAccountRecord {
   readonly encrypted_access_token: string;
   readonly token_iv: string;
   readonly token_auth_tag: string;
-  readonly status: "connected" | "needs_reauth" | "disconnected";
+  readonly status: "connected" | "needs_reauth" | "restricted" | "disconnected";
   readonly hourly_cap: number;
 }
 
@@ -106,7 +106,7 @@ export const accountsService = {
 
   async updateAccountStatus(
     accountId: string,
-    status: "connected" | "needs_reauth" | "disconnected",
+    status: "connected" | "needs_reauth" | "restricted" | "disconnected",
   ): Promise<void> {
     const { error } = await supabaseAdmin
       .from("social_accounts")

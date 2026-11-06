@@ -37,4 +37,14 @@ describe("core/templates", () => {
     const longTemplate = "A".repeat(100);
     expect(() => renderTemplate(longTemplate, {}, "Disclosure", 50)).toThrow(TemplateTooLongError);
   });
+
+  it("randomizes spintax variations to prevent identical-message spam detection", () => {
+    const template = "{Hey|Hi|Hello} @{username}, {check this|see this}: {link}";
+    const context = { username: "alex", link: "https://anozik.com/r/abc" };
+    const rendered = renderTemplate(template, context);
+
+    expect(rendered).toMatch(
+      /^(Hey|Hi|Hello) @alex, (check this|see this): https:\/\/anozik\.com\/r\/abc/,
+    );
+  });
 });
